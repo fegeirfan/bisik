@@ -11,6 +11,8 @@
 		onSelectPersona,
 		onOpenTimeline,
 		authLabel,
+		authActionText = 'Keluar',
+		showTimeline = true,
 		onSignOut
 	} = $props<{
 		activeView: AppView;
@@ -19,8 +21,10 @@
 		isPersonaOpen: boolean;
 		onTogglePersona: () => void;
 		onSelectPersona: (persona: PersonaOption) => void;
-		onOpenTimeline: () => void;
+		onOpenTimeline?: () => void;
 		authLabel?: string;
+		authActionText?: string;
+		showTimeline?: boolean;
 		onSignOut?: () => void;
 	}>();
 </script>
@@ -53,20 +57,22 @@
 			{/if}
 		</div>
 
-		<button
-			type="button"
-			class:active={activeView === 'timeline'}
-			class="nav-btn"
-			title="Timeline"
-			onclick={onOpenTimeline}
-		>
-			<Icons name="history" size={18} />
-		</button>
+		{#if showTimeline && onOpenTimeline}
+			<button
+				type="button"
+				class:active={activeView === 'timeline'}
+				class="nav-btn"
+				title="Timeline"
+				onclick={onOpenTimeline}
+			>
+				<Icons name="history" size={18} />
+			</button>
+		{/if}
 
 		{#if onSignOut}
 			<button class="session-chip" type="button" onclick={onSignOut}>
 				<span class="session-chip-label">{authLabel ?? 'Akun'}</span>
-				<span>Keluar</span>
+				<span>{authActionText}</span>
 			</button>
 		{/if}
 	</div>

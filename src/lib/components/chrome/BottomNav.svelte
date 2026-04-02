@@ -9,16 +9,17 @@
 		{ id: 'timeline', label: 'Jejak', icon: 'menu' }
 	];
 
-	let { activeView, hidden = false, onNavigate } = $props<{
+	let { activeView, hidden = false, showTimeline = true, onNavigate } = $props<{
 		activeView: AppView;
 		hidden?: boolean;
+		showTimeline?: boolean;
 		onNavigate: (view: AppView) => void;
 	}>();
 </script>
 
 {#if !hidden}
 	<nav class="bottom-nav" aria-label="Navigasi utama">
-		{#each items as item}
+		{#each items.filter((item) => showTimeline || item.id !== 'timeline') as item}
 			<button
 				type="button"
 				class:active={item.id === activeView}

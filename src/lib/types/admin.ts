@@ -1,5 +1,3 @@
-export type DevMode = 'user' | 'admin';
-
 export type AdminView =
 	| 'dashboard'
 	| 'users'

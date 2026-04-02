@@ -155,8 +155,7 @@
 .admin-nav-item,
 .admin-topbar-btn,
 .admin-action-btn,
-.admin-toggle,
-.dev-switcher button {
+.admin-toggle {
 	transition:
 		background 0.18s ease,
 		color 0.18s ease,
@@ -1092,51 +1091,6 @@
 	box-shadow: 0 0 8px var(--warn);
 }
 
-.dev-switcher {
-	position: fixed;
-	top: 14px;
-	right: 14px;
-	z-index: 1200;
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 12px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 12px;
-	background: rgba(8, 14, 26, 0.82);
-	backdrop-filter: blur(18px);
-	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
-}
-
-.dev-switcher-label {
-	color: #93a0c2;
-	font-size: 0.72rem;
-	font-weight: 600;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-.dev-switcher-actions {
-	display: flex;
-	gap: 6px;
-}
-
-.dev-switcher button {
-	padding: 7px 12px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.02);
-	color: #c8d0e7;
-	cursor: pointer;
-}
-
-.dev-switcher button.active {
-	background: #38bdf8;
-	border-color: #38bdf8;
-	color: #06111c;
-	font-weight: 700;
-}
-
 @media (max-width: 1024px) {
 	.admin-persona-grid,
 	.admin-stat-grid,
@@ -1169,9 +1123,4 @@
 		padding: 16px;
 	}
 
-	.dev-switcher {
-		top: auto;
-		right: 12px;
-		bottom: 12px;
-	}
 }

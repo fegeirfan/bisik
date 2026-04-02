@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import AuthPanel from '$lib/components/auth/AuthPanel.svelte';
 	import AuroraBackground from '$lib/components/chrome/AuroraBackground.svelte';
 	import BottomNav from '$lib/components/chrome/BottomNav.svelte';
 	import Header from '$lib/components/chrome/Header.svelte';
@@ -9,7 +8,11 @@
 	import TimelineSection from '$lib/components/sections/TimelineSection.svelte';
 	import WriteSection from '$lib/components/sections/WriteSection.svelte';
 	import { initialEntries, moods, personas, starterReplies } from '$lib/data/diary';
-	import { loginWithPassword, logout, registerWithPassword, restoreSession } from '$lib/supabase/auth';
+	import {
+		loginWithGoogle,
+		logout,
+		restoreSession
+	} from '$lib/supabase/auth';
 	import {
 		createDiaryEntry,
 		createRefinedJournal,
@@ -32,7 +35,7 @@
 	import { buildRefinedJournal } from '$lib/utils/refined';
 	import { buildInsight, countStreak, createId, getGreeting, getMoodMeta } from '$lib/utils/diary';
 
-	let activeView = $state<AppView>('home');
+	let activeView = $state<AppView>('write');
 	let selectedPersona = $state<PersonaOption>(personas[0]);
 	let availablePersonas = $state<PersonaOption[]>([...personas]);
 	let isPersonaOpen = $state(false);
@@ -42,6 +45,7 @@
 	let showHint = $state(false);
 	let chatInput = $state('');
 	let entries = $state<DiaryEntry[]>([...initialEntries]);
+	let guestRefined = $state<RefinedJournal | null>(null);
 	let chatMessages = $state<ChatMessage[]>([
 		{
 			id: createId('chat'),
@@ -58,7 +62,6 @@
 	let starterReplyIndex = 0;
 	let chatSeeded = $state(false);
 	let session = $state<SupabaseSession | null>(null);
-	let authMode = $state<'login' | 'register'>('login');
 	let authError = $state('');
 	let authLoading = $state(false);
 	let bootLoading = $state(true);
@@ -72,6 +75,8 @@
 	const trail = $derived(entries.slice(0, 14).map((entry) => getMoodMeta(entry.mood)).reverse());
 
 	function navigate(view: AppView) {
+		if (!session && view === 'timeline') return;
+
 		activeView = view;
 		isPersonaOpen = false;
 
@@ -158,7 +163,7 @@
 		}, 1500);
 	}
 
-	function sendChat() {
+	async function sendChat() {
 		const content = chatInput.trim();
 		if (!content) return;
 
@@ -170,17 +175,62 @@
 			mood: selectedMood
 		};
 
-		chatMessages = [...chatMessages, userMessage];
+		const nextMessages = [...chatMessages, userMessage];
+		chatMessages = nextMessages;
 		chatInput = '';
 
-		const replies = [
-			'Kita bisa berhenti sebentar dan memilih satu hal yang paling ingin kamu pahami dulu.',
-			'Kalau bagian ini terasa kusut, aku bisa bantu mengubahnya jadi kalimat yang lebih sederhana.',
-			'Terdengar seperti kamu sedang menanggung banyak hal sekaligus. Mana yang paling berat di dada?',
-			'Boleh juga kalau malam ini fokusnya cuma menenangkan diri, bukan menyelesaikan semuanya.'
-		];
+		if (!session) {
+			const replies = [
+				'Kita bisa berhenti sebentar dan memilih satu hal yang paling ingin kamu pahami dulu.',
+				'Kalau bagian ini terasa kusut, aku bisa bantu mengubahnya jadi kalimat yang lebih sederhana.',
+				'Terdengar seperti kamu sedang menanggung banyak hal sekaligus. Mana yang paling berat di dada?',
+				'Boleh juga kalau malam ini fokusnya cuma menenangkan diri, bukan menyelesaikan semuanya.'
+			];
 
-		queueAssistantReply(replies[starterReplyIndex++ % replies.length]);
+			queueAssistantReply(replies[starterReplyIndex++ % replies.length]);
+			return;
+		}
+
+		clearTimeout(replyTimer);
+		isTyping = true;
+
+		try {
+			const response = await fetch('/api/ai/chat', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${session.accessToken}`
+				},
+				body: JSON.stringify({
+					messages: nextMessages.slice(-12).map((m) => ({ role: m.role, content: m.content })),
+					persona: { slug: selectedPersona.slug, name: selectedPersona.name },
+					mood: selectedMood ?? null
+				})
+			});
+
+			const payload = (await response.json().catch(() => null)) as { reply?: string; error?: string } | null;
+			if (!response.ok) {
+				throw new Error(payload?.error ?? 'Gagal memproses AI.');
+			}
+
+			const reply = payload?.reply?.trim();
+			if (!reply) throw new Error('AI tidak mengembalikan jawaban.');
+
+			chatMessages = [
+				...nextMessages,
+				{
+					id: createId('chat'),
+					role: 'assistant',
+					content: reply,
+					timestamp: new Date().toISOString()
+				}
+			];
+		} catch (error) {
+			authError = error instanceof Error ? error.message : 'Gagal memproses AI.';
+			queueAssistantReply('Aku denger kamu. Mau kamu ceritain bagian yang paling berat dulu?');
+		} finally {
+			isTyping = false;
+		}
 	}
 
 	function toggleEntry(id: string) {
@@ -250,20 +300,116 @@
 
 	async function persistEntry(entry: DiaryEntry) {
 		if (!session) {
-			authError = 'Silakan login dulu untuk menyimpan diary.';
+			const refinedDraft = buildRefinedJournal({
+				id: entry.id,
+				title: entry.title,
+				content: entry.content,
+				mood: entry.mood,
+				insight: entry.insight
+			});
+
+			const nextEntry: DiaryEntry = {
+				...entry,
+				refinedJournal: refinedDraft
+			};
+
+			guestRefined = refinedDraft;
+			entries = [nextEntry, ...entries];
+			expandedIds = new Set([nextEntry.id, ...expandedIds]);
+			chatMessages = [
+				{
+					id: createId('chat'),
+					role: 'user',
+					content: nextEntry.content,
+					timestamp: nextEntry.createdAt,
+					mood: nextEntry.mood
+				}
+			];
+
+			draftTitle = '';
+			draftContent = '';
+			selectedMood = nextEntry.mood;
+			showHint = false;
+			chatInput = '';
+			chatSeeded = true;
+
+			syncMessage = 'Revisi journal dibuat. Login dengan Google untuk menyimpan.';
+			setTimeout(() => {
+				syncMessage = '';
+			}, 2000);
+
+			navigate('chat');
+			queueAssistantReply(buildAssistantReply(nextEntry));
 			return;
 		}
 
 		try {
 			syncMessage = 'Menyimpan diary...';
 			const savedEntry = await createDiaryEntry(session, entry);
-			const refinedDraft = buildRefinedJournal({
+
+			void fetch('/api/index-diary', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${session.accessToken}`
+				},
+				body: JSON.stringify({
+					diaryEntryId: savedEntry.id,
+					content: entry.content,
+					title: entry.title ?? null,
+					mood: entry.mood,
+					createdAt: savedEntry.created_at
+				})
+			}).catch(() => {
+				// ignore indexing errors for now
+			});
+
+			const localRefined = buildRefinedJournal({
 				id: savedEntry.id,
 				title: entry.title,
 				content: entry.content,
 				mood: entry.mood,
 				insight: entry.insight
 			});
+
+			let refinedContent = localRefined.content;
+			let refinedSummary = localRefined.summary ?? null;
+
+			try {
+				const response = await fetch('/api/ai/refine', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${session.accessToken}`
+					},
+					body: JSON.stringify({
+						diaryEntryId: savedEntry.id,
+						content: entry.content,
+						mood: entry.mood,
+						persona: selectedPersona.slug
+					})
+				});
+
+				const payload = (await response.json().catch(() => null)) as
+					| { refined?: string; summary?: string; error?: string }
+					| null;
+				if (response.ok && payload?.refined) {
+					refinedContent = payload.refined.trim();
+					refinedSummary = payload.summary?.trim() || null;
+				}
+			} catch {
+				// fallback to local refined
+			}
+
+			const refinedDraft: RefinedJournal = {
+				id: createId('refined'),
+				diaryEntryId: savedEntry.id,
+				title: entry.title ?? 'Refined Journal',
+				content: refinedContent,
+				summary: refinedSummary ?? undefined,
+				createdAt: new Date().toISOString()
+			};
+
 			const savedRefined = await createRefinedJournal(session, refinedDraft);
 
 			const nextEntry: DiaryEntry = {
@@ -305,7 +451,48 @@
 			chatSeeded = true;
 			syncMessage = 'Diary tersimpan.';
 			navigate('chat');
-			queueAssistantReply(buildAssistantReply(nextEntry));
+
+			clearTimeout(replyTimer);
+			isTyping = true;
+			try {
+				const response = await fetch('/api/ai/chat', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${session.accessToken}`
+					},
+					body: JSON.stringify({
+						messages: [{ role: 'user', content: nextEntry.content }],
+						persona: { slug: selectedPersona.slug, name: selectedPersona.name },
+						mood: nextEntry.mood
+					})
+				});
+				const payload = (await response.json().catch(() => null)) as { reply?: string } | null;
+				const reply = payload?.reply?.trim();
+				if (response.ok && reply) {
+					chatMessages = [
+						{
+							id: createId('chat'),
+							role: 'user',
+							content: nextEntry.content,
+							timestamp: nextEntry.createdAt,
+							mood: nextEntry.mood
+						},
+						{
+							id: createId('chat'),
+							role: 'assistant',
+							content: reply,
+							timestamp: new Date().toISOString()
+						}
+					];
+				} else {
+					queueAssistantReply(buildAssistantReply(nextEntry));
+				}
+			} catch {
+				queueAssistantReply(buildAssistantReply(nextEntry));
+			} finally {
+				isTyping = false;
+			}
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Gagal menyimpan diary.';
 		} finally {
@@ -315,7 +502,7 @@
 		}
 	}
 
-	async function handleAuthSubmit(payload: { email: string; password: string; displayName?: string }) {
+	async function handleGoogleLogin() {
 		authError = '';
 
 		if (!isSupabaseConfigured) {
@@ -325,24 +512,9 @@
 
 		try {
 			authLoading = true;
-			const nextSession =
-				authMode === 'login'
-					? await loginWithPassword(payload)
-					: await registerWithPassword(payload);
-
-			if (!nextSession) {
-				authError =
-					authMode === 'register'
-						? 'Akun dibuat. Jika konfirmasi email aktif, cek inbox lalu login.'
-						: 'Session tidak tersedia.';
-				return;
-			}
-
-			session = nextSession;
-			await loadUserData(nextSession);
+			await loginWithGoogle(window.location.origin);
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Autentikasi gagal.';
-			session = null;
 		} finally {
 			authLoading = false;
 		}
@@ -351,10 +523,19 @@
 	async function handleLogout() {
 		await logout(session?.accessToken);
 		session = null;
-		entries = [];
-		chatMessages = [];
-		authMode = 'login';
+		entries = [...initialEntries];
+		guestRefined = null;
+		chatMessages = [
+			{
+				id: createId('chat'),
+				role: 'user',
+				content: initialEntries[0].content,
+				timestamp: initialEntries[0].createdAt,
+				mood: initialEntries[0].mood
+			}
+		];
 		selectedPersona = personas[0];
+		activeView = 'write';
 	}
 
 	onMount(() => {
@@ -390,18 +571,6 @@
 				<h1 class="auth-title">Menyiapkan koneksi jurnalmu...</h1>
 			</div>
 		</section>
-	{:else if !session}
-		<AuthPanel
-			mode={authMode}
-			loading={authLoading}
-			error={authError}
-			configured={isSupabaseConfigured}
-			onSubmit={handleAuthSubmit}
-			onModeChange={(mode) => {
-				authMode = mode;
-				authError = '';
-			}}
-		/>
 	{:else}
 		<Header
 			{activeView}
@@ -410,9 +579,11 @@
 			{isPersonaOpen}
 			onTogglePersona={() => (isPersonaOpen = !isPersonaOpen)}
 			onSelectPersona={selectPersona}
-			onOpenTimeline={() => navigate('timeline')}
-			authLabel={session.user.email}
-			onSignOut={handleLogout}
+			onOpenTimeline={session ? () => navigate('timeline') : undefined}
+			showTimeline={Boolean(session)}
+			authLabel={session?.user.email ?? 'Guest'}
+			authActionText={session ? 'Keluar' : 'Masuk'}
+			onSignOut={session ? handleLogout : handleGoogleLogin}
 		/>
 
 		{#if activeView === 'home'}
@@ -451,19 +622,44 @@
 				onInput={(value) => (chatInput = value)}
 				onSend={sendChat}
 			/>
-		{:else}
+		{:else if activeView === 'timeline'}
 			<TimelineSection
 				{entries}
 				{trail}
 				{expandedIds}
 				onToggleEntry={toggleEntry}
 			/>
+		{:else}
+			<HomeSection
+				{greeting}
+				entryCount={entries.length}
+				{streak}
+				currentMood={currentMoodMeta}
+				{moods}
+				recentEntry={latestEntry}
+				{recentInsight}
+				onStartWriting={() => navigate('write')}
+				onQuickMood={chooseQuickMood}
+				onOpenChat={() => navigate('chat')}
+			/>
+		{/if}
+
+		{#if !session && activeView === 'write' && guestRefined}
+			<section class="guest-refined">
+				<div class="guest-refined-title">Revisi journal</div>
+				<pre class="guest-refined-content">{guestRefined.content}</pre>
+			</section>
 		{/if}
 
 		{#if syncMessage}
 			<div class="floating-hint show">{syncMessage}</div>
 		{/if}
 
-		<BottomNav activeView={activeView} hidden={activeView === 'chat'} onNavigate={navigate} />
+		<BottomNav
+			activeView={activeView}
+			hidden={activeView === 'chat'}
+			showTimeline={Boolean(session)}
+			onNavigate={navigate}
+		/>
 	{/if}
 </div>

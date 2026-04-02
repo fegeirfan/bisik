@@ -1,0 +1,5 @@
+FROM qdrant/qdrant:latest
+
+# Expose REST + gRPC
+EXPOSE 6333 6334
+

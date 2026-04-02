@@ -1,10 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import AuthPanel from '$lib/components/auth/AuthPanel.svelte';
+	import GoogleAuthPanel from '$lib/components/auth/GoogleAuthPanel.svelte';
 	import '$lib/styles/admin.css';
 	import AdminIcons from '$lib/components/admin/AdminIcons.svelte';
-	import { adminActivities, adminNavItems, mockPromptResponses } from '$lib/data/admin';
-	import { logout, registerWithPassword, loginWithPassword, restoreSession } from '$lib/supabase/auth';
+	import {
+		adminActivities,
+		adminNavItems,
+		mockPromptResponses
+	} from '$lib/data/admin';
+	import { loginWithGoogle, logout, restoreSession } from '$lib/supabase/auth';
 	import {
 		createAdminPersona,
 		fetchAdminEntries,
@@ -65,7 +69,6 @@
 	let toasts = $state<AdminToast[]>([]);
 	let session = $state<SupabaseSession | null>(null);
 	let bootLoading = $state(true);
-	let authMode = $state<'login' | 'register'>('login');
 	let authError = $state('');
 	let authLoading = $state(false);
 	let adminDenied = $state('');
@@ -289,12 +292,9 @@
 		}));
 	}
 
-	async function handleAuthSubmit(payload: {
-		email: string;
-		password: string;
-		displayName?: string;
-	}) {
+	async function handleGoogleLogin() {
 		authError = '';
+
 		if (!isSupabaseConfigured) {
 			authError = 'Supabase belum dikonfigurasi.';
 			return;
@@ -302,21 +302,9 @@
 
 		try {
 			authLoading = true;
-			const nextSession =
-				authMode === 'login'
-					? await loginWithPassword(payload)
-					: await registerWithPassword(payload);
-
-			if (!nextSession) {
-				authError = 'Session admin belum tersedia.';
-				return;
-			}
-
-			session = nextSession;
-			await loadAdminData(nextSession);
+			await loginWithGoogle(window.location.origin + '/admin');
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Autentikasi gagal.';
-			session = null;
 		} finally {
 			authLoading = false;
 		}
@@ -510,16 +498,11 @@
 		</div>
 	</section>
 {:else if !session}
-	<AuthPanel
-		mode={authMode}
+	<GoogleAuthPanel
+		configured={isSupabaseConfigured}
 		loading={authLoading}
 		error={authError}
-		configured={isSupabaseConfigured}
-		onSubmit={handleAuthSubmit}
-		onModeChange={(mode) => {
-			authMode = mode;
-			authError = '';
-		}}
+		onGoogle={handleGoogleLogin}
 	/>
 {:else if adminDenied}
 	<section class="auth-gate">

@@ -996,6 +996,16 @@ button {
 	gap: 8px;
 }
 
+.auth-form .auth-honeypot {
+	position: absolute;
+	left: -10000px;
+	top: auto;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
 .auth-form span {
 	color: var(--text-secondary);
 	font-size: 0.84rem;
@@ -1045,6 +1055,35 @@ button {
 	background: rgba(251, 191, 36, 0.12);
 	border: 1px solid rgba(251, 191, 36, 0.2);
 	color: #fcd34d;
+}
+
+.guest-refined {
+	max-width: 980px;
+	width: 100%;
+	margin: 0 auto;
+	padding: 18px 18px 14px;
+	border: 1px solid var(--border);
+	border-radius: 18px;
+	background: rgba(17, 30, 53, 0.55);
+	backdrop-filter: blur(18px);
+}
+
+.guest-refined-title {
+	color: var(--text-secondary);
+	font-size: 0.82rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	margin-bottom: 10px;
+}
+
+.guest-refined-content {
+	margin: 0;
+	white-space: pre-wrap;
+	color: var(--text-primary);
+	line-height: 1.55;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+	font-size: 0.92rem;
 }
 
 .bnav-item {
